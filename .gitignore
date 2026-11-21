@@ -1,5 +1,0 @@
-# Публикуем только финальную версию + README
-*
-!.gitignore
-!README.md
-!door_sliding_viz_v12.html
