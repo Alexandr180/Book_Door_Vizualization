@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Симулятор раздвижной двери-книжки</title>
+    <style>
+        :root {
+            --foreground: #333333;
+            --muted-foreground: #888888;
+            --card: #ffffff;
+            --border: #cccccc;
+            --bg-app: #f0f2f5;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #333333;
+            background: #f0f2f5;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            height: 100%;
+        }
+        .controls {
+            width: 340px;
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #cccccc;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 0.9rem;
+            color: #888888;
+        }
+        input, select {
+            background: #ffffff;
+            color: #333333;
+            border: 1px solid #cccccc;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+        .viz {
+            flex-grow: 1;
+            position: relative;
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #cccccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+        .wall { stroke: #666; stroke-width: 15; stroke-linecap: round; }
+        .rail { stroke: #f59e0b; stroke-width: 4; stroke-linecap: round; }
+        .panel-a { fill: #3b82f6; stroke: #1d4ed8; stroke-width: 2; }
+        .panel-b { fill: #60a5fa; stroke: #2563eb; stroke-width: 2; }
+        .axis { fill: red; }
+        .angle-label { font-size: 18px; fill: #ff0000; font-weight: bold; }
+        .dim-label { font-size: 14px; fill: #555; font-weight: bold; }
+        .dim-line { stroke: #555; stroke-width: 1.5; }
+        .dim-ext { stroke: #999; stroke-width: 1; }
+        .boundary { stroke: #ff0000; stroke-width: 2; stroke-dasharray: 5; }
+        .collision-mark { stroke: #ff0000; stroke-width: 5; stroke-linecap: round; }
+        .debug-text { font-size: 12px; fill: #888; font-family: monospace; }
+        .panel-label { font-size: 18px; font-weight: bold; fill: #ffffff; text-anchor: middle; pointer-events: none; }
+        .btn {
+            background: #eee; border: 1px solid #ccc; padding: 8px; 
+            cursor: pointer; border-radius: 4px; font-size: 0.8rem;
+        }
+        .btn:hover { background: #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h3 style="margin-top:0">Раздвижной дверь-книжка</h3>
+            
+            <div class="control-group">
+                <label>Ширина створки А, мм</label>
+                <input type="number" id="widthA" value="280">
+            </div>
+            <div class="control-group">
+                <label>Смещение оси 1 в створке А, мм</label>
+                <input type="number" id="offA" value="40">
+            </div>
+            <div class="control-group">
+                <label>Ширина створки Б, мм</label>
+                <input type="number" id="widthB" value="320">
+            </div>
+            <div class="control-group">
+                <label>Смещение оси 3 в створке Б, мм</label>
+                <input type="number" id="offB" value="40">
+            </div>
+            <div class="control-group">
+                <label>Толщина створок, мм</label>
+                <input type="number" id="thickness" value="40">
+            </div>
+            <div class="control-group">
+                <label>Зазор проема (чистый, мм)</label>
+                <input type="number" id="gap" value="10">
+            </div>
+            <div class="control-group">
+                <label>Число створок</label>
+                <select id="panelCount">
+                    <option value="2" selected>2 створки</option>
+                    <option value="4">4 створки (зеркальные A и B)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Длина стенок, мм</label>
+                <input type="number" id="wallLen" value="200">
+            </div>
+            <hr style="border: 0; border-top: 1px solid #cccccc; width: 100%;">
+            
+            <div class="control-group">
+                <label>Угол створки А: <span id="angleAVal">0</span>°</label>
+                <input type="range" id="angleA" min="0" max="180" value="0" style="width: 100%;">
+            </div>
+            
+            <button class="btn" id="testBtn">Тест: Принудительная коллизия</button>
+            
+            <div style="font-size: 0.8rem; color: #888888; margin-top: 10px;">
+                <b>Диагностика:</b><br>
+                - Коллизия: Тонкие красные ✕ в точках удара.
+            </div>
+        </div>
+        <div class="viz">
+            <svg id="svgCanvas" viewBox="0 0 800 600">
+                <defs>
+                    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+                        <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#ddd" stroke-width="1"/>
+                    </pattern>
+                    <marker id="dimArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+                    </marker>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#grid)" />
+                
+                <line id="wallLeft" class="wall" x1="0" y1="0" x2="0" y2="0" />
+                <line id="wallRight" class="wall" x1="0" y1="0" x2="0" y2="0" />
+                <line id="railLine" class="rail" x1="0" y1="0" x2="0" y2="0" />
+                
+                <line id="boundLeft" class="boundary" x1="0" y1="0" x2="0" y2="0" />
+                <line id="boundRight" class="boundary" x1="0" y1="0" x2="0" y2="0" />
+                
+                <g id="groupA">
+                    <rect id="rectA" class="panel-a" x="0" y="0" width="0" height="0" />
+                    <text id="labelA" class="panel-label" x="0" y="0">Створка А</text>
+                </g>
+                <g id="groupB">
+                    <rect id="rectB" class="panel-b" x="0" y="0" width="0" height="0" />
+                    <text id="labelB" class="panel-label" x="0" y="0">Створка Б</text>
+                </g>
+                <g id="groupAMir" display="none">
+                    <rect id="rectAMir" class="panel-a" x="0" y="0" width="0" height="0" />
+                </g>
+                <g id="groupBmir" display="none">
+                    <rect id="rectBmir" class="panel-b" x="0" y="0" width="0" height="0" />
+                </g>
+                <text id="labelAMir" class="panel-label" x="0" y="0" display="none">Створка А</text>
+                <text id="labelBmir" class="panel-label" x="0" y="0" display="none">Створка Б</text>
+                
+                <circle id="axis1" class="axis" cx="0" cy="0" r="5" />
+                <circle id="axis2" class="axis" cx="0" cy="0" r="5" />
+                <circle id="axis3" class="axis" cx="0" cy="0" r="5" />
+
+                <g id="mirAxes" display="none">
+                    <circle id="axis1Mir" class="axis" cx="0" cy="0" r="5" />
+                    <circle id="axis2Mir" class="axis" cx="0" cy="0" r="5" />
+                    <circle id="axis3Mir" class="axis" cx="0" cy="0" r="5" />
+                </g>
+                
+                <g id="collisionMarks"></g>
+                
+                <line id="dimExtLeft" class="dim-ext" x1="0" y1="0" x2="0" y2="0"/>
+                <line id="dimExtRight" class="dim-ext" x1="0" y1="0" x2="0" y2="0"/>
+                <line id="dimLine" class="dim-line" x1="0" y1="0" x2="0" y2="0" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"/>
+                <text id="labelProem" class="dim-label" x="0" y="0" text-anchor="middle"></text>
+                <text id="statusText" x="20" y="40" class="angle-label"></text>
+                <text id="debugInfo" class="debug-text" x="20" y="60"></text>
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        const inputs = ['widthA', 'offA', 'widthB', 'offB', 'thickness', 'gap', 'wallLen', 'angleA', 'panelCount'];
+        const elements = {};
+        inputs.forEach(id => elements[id] = document.getElementById(id));
+        
+        const groupA = document.getElementById('groupA');
+        const groupB = document.getElementById('groupB');
+        const rectA = document.getElementById('rectA');
+        const rectB = document.getElementById('rectB');
+        const labelA = document.getElementById('labelA');
+        const labelB = document.getElementById('labelB');
+        const groupAMir = document.getElementById('groupAMir');
+        const rectAMir = document.getElementById('rectAMir');
+        const labelAMir = document.getElementById('labelAMir');
+        const groupBmir = document.getElementById('groupBmir');
+        const rectBmir = document.getElementById('rectBmir');
+        const labelBmir = document.getElementById('labelBmir');
+        const axis1 = document.getElementById('axis1');
+        const axis2 = document.getElementById('axis2');
+        const axis3 = document.getElementById('axis3');
+        const mirAxes = document.getElementById('mirAxes');
+        const axis1Mir = document.getElementById('axis1Mir');
+        const axis2Mir = document.getElementById('axis2Mir');
+        const axis3Mir = document.getElementById('axis3Mir');
+        const wallLeft = document.getElementById('wallLeft');
+        const wallRight = document.getElementById('wallRight');
+        const railLine = document.getElementById('railLine');
+        const boundLeft = document.getElementById('boundLeft');
+        const boundRight = document.getElementById('boundRight');
+        const labelProem = document.getElementById('labelProem');
+        const dimLine = document.getElementById('dimLine');
+        const dimExtLeft = document.getElementById('dimExtLeft');
+        const dimExtRight = document.getElementById('dimExtRight');
+        const angleAVal = document.getElementById('angleAVal');
+        const statusText = document.getElementById('statusText');
+        const debugInfo = document.getElementById('debugInfo');
+        const collisionMarks = document.getElementById('collisionMarks');
+        const testBtn = document.getElementById('testBtn');
+
+        const SCALE = 0.6;
+        const CENTER_Y = 300;
+        const WALL_THICKNESS = 15;
+
+        function getWorldCoord(localX, localY, centerX, centerY, angleRad) {
+            return {
+                x: centerX + (localX * Math.cos(angleRad) - localY * Math.sin(angleRad)),
+                y: centerY + (localX * Math.sin(angleRad) + localY * Math.cos(angleRad))
+            };
+        }
+
+        function pointInOBB(px, py, c, th, hw, hh) {
+            const dx = px - c.x, dy = py - c.y;
+            const lx = dx * Math.cos(th) + dy * Math.sin(th);
+            const ly = -dx * Math.sin(th) + dy * Math.cos(th);
+            return Math.abs(lx) <= hw + 0.05 && Math.abs(ly) <= hh + 0.05;
+        }
+
+        function obbOverlap(c1, th1, hw1, hh1, c2, th2, hw2, hh2, tol = 0.3) {
+            const axes = [
+                [Math.cos(th1), Math.sin(th1)], [-Math.sin(th1), Math.cos(th1)],
+                [Math.cos(th2), Math.sin(th2)], [-Math.sin(th2), Math.cos(th2)]
+            ];
+            const dx = c2.x - c1.x, dy = c2.y - c1.y;
+            for (const [ux, uy] of axes) {
+                const sep = Math.abs(dx * ux + dy * uy);
+                const rad1 = hw1 * Math.abs(ux) + hh1 * Math.abs(uy);
+                const rad2 = hw2 * Math.abs(ux) + hh2 * Math.abs(uy);
+                if (sep >= rad1 + rad2 - tol) return false;
+            }
+            return true;
+        }
+
+        // ---- [v11] ТОЧНЫЙ poly-poly collision по реальным контурам створок ----
+        // Ошибочность прежнего OBB-метода: полувдоль был = ПОЛНАЯ длина створки (wB*SCALE/2),
+        // поэтому длинные OBB-коробки ложно «пересекались» в центре, а крестик ставился
+        // в случайный OBB-угол — отсюда «коллизия когда её не должно» + «крестик смещён вниз».
+        // Теперь тест — по 4 реальным вершинам кванов, крестик — в центроид пересечения.
+        function signedArea(poly) {
+            let a = 0;
+            for (let i = 0; i < poly.length; i++) {
+                const p = poly[i], q = poly[(i + 1) % poly.length];
+                a += p.x * q.y - q.x * p.y;
+            }
+            return a / 2;
+        }
+        function ensureCCW(poly) {
+            return signedArea(poly) < 0 ? poly.slice().reverse() : poly.slice();
+        }
+        function lineIntersect(p1, p2, p3, p4) {
+            const d1x = p2.x - p1.x, d1y = p2.y - p1.y, d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+            const den = d1x * d2y - d1y * d2x;
+            if (Math.abs(den) < 1e-9) return null;
+            const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / den;
+            return { x: p1.x + t * d1x, y: p1.y + t * d1y };
+        }
+        function clipPolygon(subject, clip) {
+            // Sutherland–Hodgman: вырезаем пересечение двух выпуклых квадров (CCW)
+            clip = ensureCCW(clip);
+            let output = ensureCCW(subject);
+            for (let i = 0; i < clip.length && output.length; i++) {
+                const A = clip[i], B = clip[(i + 1) % clip.length];
+                const ex = B.x - A.x, ey = B.y - A.y;
+                const nx = -ey, ny = ex;                    // внутренняя (левая) нормапь
+                const keep = p => (p.x - A.x) * nx + (p.y - A.y) * ny >= -1e-6;
+                const input = output;
+                output = [];
+                let prev = input[input.length - 1];
+                for (let j = 0; j < input.length; j++) {
+                    const cur = input[j];
+                    const curIn = keep(cur), prevIn = keep(prev);
+                    if (curIn) {
+                        if (!prevIn) { const I = lineIntersect(prev, cur, A, B); if (I) output.push(I); }
+                        output.push(cur);
+                    }
+                    prev = cur;
+                }
+            }
+            return output;
+        }
+        function polyCentroid(poly) {
+            if (!poly || poly.length < 3) return null;
+            let x = 0, y = 0;
+            for (const p of poly) { x += p.x; y += p.y; }
+            return { x: x / poly.length, y: y / poly.length };
+        }
+        function polyOverlap(P, Q, tol = 1e-6) {
+            // точный Separating Axis Test для двух выпуклых полигонов
+            for (const poly of [P, Q]) {
+                for (let i = 0; i < poly.length; i++) {
+                    const p1 = poly[i], p2 = poly[(i + 1) % poly.length];
+                    const ex = p2.x - p1.x, ey = p2.y - p1.y;
+                    const L = Math.hypot(ex, ey);
+                    if (L < 1e-9) continue;
+                    const nx = -ey / L, ny = ex / L;
+                    let mnP = Infinity, mxP = -Infinity, mnQ = Infinity, mxQ = -Infinity;
+                    for (const p of P) { const d = p.x * nx + p.y * ny; if (d < mnP) mnP = d; if (d > mxP) mxP = d; }
+                    for (const p of Q) { const d = p.x * nx + p.y * ny; if (d < mnQ) mnQ = d; if (d > mxQ) mxQ = d; }
+                    if (mxP < mnQ - tol || mxQ < mnP - tol) return false; // существует зазор
+                }
+            }
+            return true;
+        }
+        function overlapCentroid(P, Q) {
+            // центроид РЕАЛЬНОЙ области пересечения — крестик точно в точке контакта
+            const inter = clipPolygon(P, Q);
+            if (inter.length >= 3) return polyCentroid(inter);
+            const a = polyCentroid(ensureCCW(P)), b = polyCentroid(ensureCCW(Q));
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        }
+
+        function update(forceCollision = false) {
+            const wA = parseFloat(elements.widthA.value) || 0;
+            const oA = parseFloat(elements.offA.value) || 0;
+            const wB = parseFloat(elements.widthB.value) || 0;
+            const oB = parseFloat(elements.offB.value) || 0;
+            const thick = parseFloat(elements.thickness.value) || 0;
+            const gap = parseFloat(elements.gap.value) || 0;
+            const wLen = parseFloat(elements.wallLen.value) || 0;
+            const aA_deg = parseFloat(elements.angleA.value) || 0;
+            
+            angleAVal.innerText = aA_deg;
+            const radA = (aA_deg * Math.PI) / 180;
+
+            const pCount = parseInt(elements.panelCount.value) || 2;
+            const nLeaves = (pCount === 4) ? 4 : 2;
+            const gapCount = nLeaves === 4 ? 3 : 2; // Реальные щели: [стена|A], [B|B'] (режим 4), [A'|стена]; связь A-B — жёсткая петля (без зазора)
+            const unitGap = gap / gapCount;
+            const proemMM = nLeaves === 4 ? (2 * wA + 2 * wB + gap) : (wA + wB + gap);
+            const cleanProemWidth = proemMM * SCALE;
+            const totalWidth = cleanProemWidth + WALL_THICKNESS;
+            const WALL_X = (800 - totalWidth) / 2;
+            const innerLeftWall = WALL_X + (WALL_THICKNESS / 2);
+            const innerRightWall = innerLeftWall + cleanProemWidth;
+            const xRight = innerRightWall + (WALL_THICKNESS / 2);
+            const centerProem = (innerLeftWall + innerRightWall) / 2;
+
+            const offsetToCenter = unitGap * SCALE;
+            const x1 = innerLeftWall + offsetToCenter + oA * SCALE;
+            const y1 = CENTER_Y;
+            
+            axis1.setAttribute('cx', x1);
+            axis1.setAttribute('cy', y1);
+            axis1Mir.setAttribute('cx', 2 * centerProem - x1);
+            axis1Mir.setAttribute('cy', y1);
+            
+            const wallHalfLen = (wLen * SCALE) / 2;
+            wallLeft.setAttribute('x1', WALL_X);
+            wallLeft.setAttribute('y1', y1 - wallHalfLen);
+            wallLeft.setAttribute('x2', WALL_X);
+            wallLeft.setAttribute('y2', y1 + wallHalfLen);
+
+            wallRight.setAttribute('x1', xRight);
+            wallRight.setAttribute('y1', y1 - wallHalfLen);
+            wallRight.setAttribute('x2', xRight);
+            wallRight.setAttribute('y2', y1 + wallHalfLen);
+
+            boundLeft.setAttribute('x1', innerLeftWall);
+            boundLeft.setAttribute('y1', y1 - wallHalfLen);
+            boundLeft.setAttribute('x2', innerLeftWall);
+            boundLeft.setAttribute('y2', y1 + wallHalfLen);
+            boundRight.setAttribute('x1', innerRightWall);
+            boundRight.setAttribute('y1', y1 - wallHalfLen);
+            boundRight.setAttribute('x2', innerRightWall);
+            boundRight.setAttribute('y2', y1 + wallHalfLen);
+
+            railLine.setAttribute('x1', WALL_X);
+            railLine.setAttribute('y1', y1);
+            railLine.setAttribute('x2', xRight);
+            railLine.setAttribute('y2', y1);
+
+            const yDim = y1 - wallHalfLen - 25;
+            dimExtLeft.setAttribute('x1', innerLeftWall);
+            dimExtLeft.setAttribute('y1', y1 - wallHalfLen);
+            dimExtLeft.setAttribute('x2', innerLeftWall);
+            dimExtLeft.setAttribute('y2', yDim - 5);
+            dimExtRight.setAttribute('x1', innerRightWall);
+            dimExtRight.setAttribute('y1', y1 - wallHalfLen);
+            dimExtRight.setAttribute('x2', innerRightWall);
+            dimExtRight.setAttribute('y2', yDim - 5);
+            dimLine.setAttribute('x1', innerLeftWall);
+            dimLine.setAttribute('y1', yDim);
+            dimLine.setAttribute('x2', innerRightWall);
+            dimLine.setAttribute('y2', yDim);
+            labelProem.setAttribute('x', (innerLeftWall + innerRightWall) / 2);
+            labelProem.setAttribute('y', yDim - 8);
+            labelProem.textContent = `Ширина проема: ${proemMM} мм`;
+
+            const rectThickScale = thick * SCALE;
+
+            // --- Stvorka A ---
+            const dx12 = (wA - oA) * SCALE; // A-B связаны жёсткой петлей — зазора между ними нет
+            const dy12 = -rectThickScale / 2;
+            const dist1to2 = Math.sqrt(dx12*dx12 + dy12*dy12);
+            const localAngle12 = Math.atan2(dy12, dx12);
+            const x2 = x1 + Math.cos(radA + localAngle12) * dist1to2;
+            const y2 = y1 + Math.sin(radA + localAngle12) * dist1to2;
+            axis2.setAttribute('cx', x2);
+            axis2.setAttribute('cy', y2);
+
+            const rectAWidth = wA * SCALE;
+            rectA.setAttribute('width', rectAWidth);
+            rectA.setAttribute('height', rectThickScale);
+            rectA.setAttribute('x', (innerLeftWall + offsetToCenter) - x1);
+            rectA.setAttribute('y', -rectThickScale / 2);
+            const labALx = (innerLeftWall + offsetToCenter) - x1 + rectAWidth / 2;
+            labelA.setAttribute('x', labALx);
+            labelA.setAttribute('y', 6);
+            groupA.setAttribute('transform', `translate(${x1},${y1}) rotate(${aA_deg})`);
+            
+            rectAMir.setAttribute('width', rectAWidth);
+            rectAMir.setAttribute('height', rectThickScale);
+            rectAMir.setAttribute('x', (innerLeftWall + offsetToCenter) - x1);
+            rectAMir.setAttribute('y', -rectThickScale / 2);
+            groupAMir.setAttribute('transform', `translate(${2 * centerProem - x1},${y1}) scale(-1,1) rotate(${aA_deg})`);
+            const cA = Math.cos(radA), sA = Math.sin(radA);
+            const lAMx = 2 * centerProem - (x1 + cA * labALx - sA * 6);
+            const lAMy = y1 + sA * labALx + cA * 6;
+            labelAMir.setAttribute('x', lAMx);
+            labelAMir.setAttribute('y', lAMy);
+            labelAMir.setAttribute('transform', `rotate(${-aA_deg} ${lAMx} ${lAMy})`);
+            groupAMir.setAttribute('display', pCount === 4 ? 'inline' : 'none');
+            labelAMir.setAttribute('display', pCount === 4 ? 'inline' : 'none');
+
+            // --- Stvorka B ---
+            const dx23 = (wB - oB) * SCALE;
+            const dy23 = rectThickScale / 2;
+            const dist2to3 = Math.sqrt(dx23*dx23 + dy23*dy23);
+            const y3 = y1;
+            const dy_abs = y3 - y2;
+            const dxSq = dist2to3 * dist2to3 - dy_abs * dy_abs;
+
+            let kinError = false;
+            let collisionLeft = false;
+            let collisionRight = false;
+            let finalX3 = 0;
+            let radB_final = 0;
+
+            if (dxSq < 0) {
+                kinError = true;
+                statusText.textContent = "⚠️ Ошибка: Створка А слишком далеко!";
+                rectB.setAttribute('width', 0);
+                labelB.setAttribute('x', -200);
+                axis3.setAttribute('cx', -100);
+                groupBmir.setAttribute('display', 'none');
+                labelBmir.setAttribute('display', 'none');
+                mirAxes.setAttribute('display', 'none');
+            } else {
+                statusText.textContent = "";
+                const dx = Math.sqrt(dxSq);
+                finalX3 = x2 + dx; 
+                axis3.setAttribute('cx', finalX3);
+                axis3.setAttribute('cy', y3);
+                axis2Mir.setAttribute('cx', 2 * centerProem - x2);
+                axis2Mir.setAttribute('cy', y2);
+                axis3Mir.setAttribute('cx', 2 * centerProem - finalX3);
+                axis3Mir.setAttribute('cy', y3);
+                mirAxes.setAttribute('display', pCount === 4 ? 'inline' : 'none');
+                const localAngle23 = Math.atan2(dy23, dx23);
+                const worldAngle23 = Math.atan2(y3 - y2, finalX3 - x2);
+                radB_final = worldAngle23 - localAngle23;
+                const aB_deg = radB_final * 180 / Math.PI;
+                const rectBWidth = wB * SCALE;
+                rectB.setAttribute('width', rectBWidth);
+                rectB.setAttribute('height', rectThickScale);
+                rectB.setAttribute('x', 0);
+                rectB.setAttribute('y', 0); 
+                const labBLx = rectBWidth / 2;
+                const labBLy = rectThickScale / 2 + 6;
+                labelB.setAttribute('x', labBLx);
+                labelB.setAttribute('y', labBLy);
+                groupB.setAttribute('transform', `translate(${x2},${y2}) rotate(${aB_deg})`);
+                
+                rectBmir.setAttribute('width', rectBWidth);
+                rectBmir.setAttribute('height', rectThickScale);
+                rectBmir.setAttribute('x', 0);
+                rectBmir.setAttribute('y', 0);
+                groupBmir.setAttribute('transform', `translate(${2 * centerProem - x2},${y2}) scale(-1,1) rotate(${aB_deg})`);
+                const cB = Math.cos(radB_final), sB = Math.sin(radB_final);
+                const lBMx = 2 * centerProem - (x2 + cB * labBLx - sB * labBLy);
+                const lBMy = y2 + sB * labBLx + cB * labBLy;
+                labelBmir.setAttribute('x', lBMx);
+                labelBmir.setAttribute('y', lBMy);
+                labelBmir.setAttribute('transform', `rotate(${-aB_deg} ${lBMx} ${lBMy})`);
+                groupBmir.setAttribute('display', pCount === 4 ? 'inline' : 'none');
+                labelBmir.setAttribute('display', pCount === 4 ? 'inline' : 'none');
+            }
+
+            // --- PROVERKA I OTRISOVKA ---
+            collisionMarks.innerHTML = '';
+            let minX = Infinity, maxX = -Infinity;
+
+            const drawCollisionCross = (wx, wy) => {
+                const s = 10.6; 
+                const l1 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                l1.setAttribute('x1', wx - s); l1.setAttribute('y1', wy - s);
+                l1.setAttribute('x2', wx + s); l1.setAttribute('y2', wy + s);
+                l1.setAttribute('class', 'collision-mark');
+                
+                const l2 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                l2.setAttribute('x1', wx - s); l2.setAttribute('y1', wy + s);
+                l2.setAttribute('x2', wx + s); l2.setAttribute('y2', wy - s);
+                l2.setAttribute('class', 'collision-mark');
+                
+                collisionMarks.appendChild(l1);
+                collisionMarks.appendChild(l2);
+            };
+
+            // Stvorka A
+            const aLX = (innerLeftWall + offsetToCenter) - x1;
+            const aCorners = [
+                {lx: aLX, ly: -rectThickScale/2},
+                {lx: aLX + rectAWidth, ly: -rectThickScale/2},
+                {lx: aLX + rectAWidth, ly: rectThickScale/2},
+                {lx: aLX, ly: rectThickScale/2}
+            ];
+            
+            const aWorldCorners = [];
+            aCorners.forEach(p => {
+                const coord = getWorldCoord(p.lx, p.ly, x1, y1, radA);
+                aWorldCorners.push(coord);
+                if (coord.x < innerLeftWall - 0.1 || coord.x > innerRightWall + 0.1) {
+                    drawCollisionCross(coord.x, coord.y);
+                }
+
+                minX = Math.min(minX, coord.x); maxX = Math.max(maxX, coord.x);
+                if (coord.x < innerLeftWall - 0.1) collisionLeft = true;
+                if (coord.x > innerRightWall + 0.1) collisionRight = true;
+            });
+
+            // Stvorka B
+            const bCorners = [
+                {lx: 0, ly: 0},
+                {lx: (wB * SCALE), ly: 0},
+                {lx: (wB * SCALE), ly: rectThickScale},
+                {lx: 0, ly: rectThickScale}
+            ];
+            
+            const bWorldCorners = [];
+            bCorners.forEach(p => {
+                const coord = getWorldCoord(p.lx, p.ly, x2, y2, radB_final);
+                bWorldCorners.push(coord);
+                if (coord.x < innerLeftWall - 0.1 || coord.x > innerRightWall + 0.1) {
+                    drawCollisionCross(coord.x, coord.y);
+                }
+
+                minX = Math.min(minX, coord.x); maxX = Math.max(maxX, coord.x);
+                if (coord.x < innerLeftWall - 0.1) collisionLeft = true;
+                if (coord.x > innerRightWall + 0.1) collisionRight = true;
+            });
+
+            // --- Зеркальные створки: проверка коллизий со стеной и с первой группой (A, B) ---
+            let groupCollision = false;
+            if (pCount === 4 && !kinError) {
+                const mirrorPts = (list) => list.map(pt => ({ x: 2 * centerProem - pt.x, y: pt.y }));
+                const mirACorners = mirrorPts(aWorldCorners);
+                const mirBCorners = mirrorPts(bWorldCorners);
+
+                // Зеркальные створки vs стена
+                [...mirACorners, ...mirBCorners].forEach(w => {
+                    if (w.x < innerLeftWall - 0.1) {
+                        drawCollisionCross(w.x, w.y);
+                        collisionLeft = true;
+                        if (w.x < minX) minX = w.x;
+                    }
+                    if (w.x > innerRightWall + 0.1) {
+                        drawCollisionCross(w.x, w.y);
+                        collisionRight = true;
+                        if (w.x > maxX) maxX = w.x;
+                    }
+                });
+
+                // [v11] ТОЧНЫЙ poly-poly по реальным 4 вершинам контуров (а не OBB, у
+                // которого полувдоль = ПОЛНАЯ длина створки — отсюда ложный «пересечение»
+                // в центре и «сдвинутый вниз» крестик). Тест — точный SAT на контурах,
+                // крестик — в центроид РЕАЛЬНОЙ области пересечения двух контуров.
+                const markAgainst = (mirPoly, origPoly) => {
+                    if (!mirPoly || !origPoly || mirPoly.length < 3 || origPoly.length < 3) return;
+                    if (polyOverlap(mirPoly, origPoly)) {
+                        groupCollision = true;
+                        const cen = overlapCentroid(mirPoly, origPoly);
+                        if (cen) drawCollisionCross(cen.x, cen.y);
+                    }
+                };
+                markAgainst(mirACorners, aWorldCorners);  // A' vs A
+                markAgainst(mirACorners, bWorldCorners);  // A' vs B
+                markAgainst(mirBCorners, aWorldCorners);  // B' vs A
+                markAgainst(mirBCorners, bWorldCorners);  // B' vs B  (центральный стык)
+            }
+
+            if (forceCollision) {
+                collisionLeft = true;
+                collisionRight = true;
+            }
+
+            debugInfo.textContent = `Left Bound: ${innerLeftWall.toFixed(1)} | minX: ${minX.toFixed(1)} | maxX: ${maxX.toFixed(1)} | Right Bound: ${innerRightWall.toFixed(1)}`;
+
+            if (collisionLeft || collisionRight || groupCollision) {
+                const msgs = [];
+                if (collisionLeft || collisionRight) msgs.push("КОЛЛИЗИЯ СО СТЕНОЙ");
+                if (groupCollision) msgs.push("КОЛЛИЗИЯ МЕЖДУ ГРУППАМИ");
+                statusText.textContent = "⚠️ " + msgs.join(" + ") + "!";
+            } else if (statusText.textContent.indexOf("КОЛЛИЗИЯ") !== -1) {
+                statusText.textContent = "";
+            }
+        }
+
+        testBtn.addEventListener('click', () => update(true));
+        inputs.forEach(id => elements[id].addEventListener('input', () => update(false)));
+        document.getElementById('panelCount').addEventListener('change', () => update(false));
+        update();
+    </script>
+</body>
+</html>
